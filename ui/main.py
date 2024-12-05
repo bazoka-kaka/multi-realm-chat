@@ -2,6 +2,7 @@ import flet as ft
 from create_group_form import *
 from signin_form import *
 from signup_form import *
+from join_form import *
 from users_db import *
 from chat_message import *
 import socket
@@ -74,18 +75,51 @@ def main(page: ft.Page):
             
     def create_grp(group_name: str):
         db = UsersDB()
-        # if not db.read_db(group_name):
-        #     print("Group doesn't exist ...")
-        #     page.banner.open = True
-        #     page.update()
-        # else:
-        print("Redirecting to list...")
-        page.route = "/list"
-        # send_to_server(json.dumps({"type": "create_group", "group_name": group_name}))
-        session = page.session.get("session")
-        print(session)
-        send_to_server(f"create_group {session} {group_name}")
-        page.update()
+        if db.read_group(group_name):
+            print("Group already exists ...")
+            page.banner.open = True
+            page.update()
+        else:
+            print("Redirecting to list...")
+            page.route = "/list"
+            # send_to_server(json.dumps({"type": "create_group", "group_name": group_name}))
+            session = page.session.get("session")
+            print(session)
+            send_to_server(f"create_group {session} {group_name}")
+            db.write_group(group_name)
+            page.update()
+            
+    def get_group_messages(group_name:str):
+        sessid = page.session.get("session")
+        res = send_to_server(f"group_inbox {sessid} {group_name}")
+        print(res)
+        data = json.loads(res)
+        return data['messages']
+
+    def join_grp(group_name: str):
+        db = UsersDB()
+        if not db.read_group(group_name):
+            print("Group doesn't exists ...")
+            page.banner.open = True
+            page.update()
+        else:
+            print("Redirecting to group chat...")
+            page.route = "/chat"
+            # send_to_server(json.dumps({"type": "create_group", "group_name": group_name}))
+            session = page.session.get("session")
+            print(session)
+            send_to_server(f"join_group {session} {group_name}")
+            db.write_group(group_name)
+            page.session.set("group", group_name)
+            messages = get_group_messages(group_name=group_name)
+            db.set_messages(group_name=group_name, group_messages=messages)
+            # implement messages to ui
+            for message in messages:
+                print(message)
+                msg = Message(user=message['msg_from'], text=message['msg'], message_type="chat_message")
+                m = ChatMessage(msg)
+                chat.controls.append(m)
+            page.update()
 
     def sign_up(user: str, password: str):
         db = UsersDB()
@@ -100,6 +134,8 @@ def main(page: ft.Page):
         elif message.message_type == "login_message":
             m = ft.Text(message.text, italic=True, color=ft.colors.WHITE, size=12)
         chat.controls.append(m)
+        # m = ChatMessage(message)
+        # chat.controls.append(m)
         page.update()
 
     page.pubsub.subscribe(on_message)
@@ -113,7 +149,11 @@ def main(page: ft.Page):
                 message_type="chat_message",
             )
         )
-        send_to_server(json.dumps({"type": "message", "user": page.session.get("user"), "message": message}))
+        group_name = page.session.get("group")
+        session = page.session.get("session")
+        send_to_server(f"send_group {session} {group_name} {message}")
+
+        # send_to_server(json.dumps({"type": "message", "user": page.session.get("user"), "message": message}))
         new_message.value = ""
         page.update()
 
@@ -123,6 +163,10 @@ def main(page: ft.Page):
         
     def btn_join(e):
         page.route = "/join"
+        page.update()
+
+    def btn_create(e):
+        page.route = "/create-group"
         page.update()
 
     def btn_signup(e):
@@ -151,7 +195,7 @@ def main(page: ft.Page):
     def join_group_chat(e):
         def close_and_redirect(e):
           page.dialog.open = False
-          page.route = "/chat"
+          page.route = "/join"
           page.update()
 
         page.dialog = ft.AlertDialog(
@@ -228,6 +272,7 @@ def main(page: ft.Page):
     signin_UI = SignInForm(sign_in, btn_signup)
     signup_UI = SignUpForm(sign_up, btn_signin)
     create_group = CreateGroup(create_grp, btn_join)
+    join_group = JoinForm(join_grp, btn_create)
 
     chat = ft.ListView(
         expand=True,
@@ -249,7 +294,7 @@ def main(page: ft.Page):
     page.banner = ft.Banner(
         bgcolor=ft.colors.BLACK45,
         leading=ft.Icon(ft.icons.ERROR, color=ft.colors.RED, size=40),
-        content=ft.Text("Log in failed, Incorrect User Name or Password"),
+        content=ft.Text("An error occured!"),
         actions=[
             ft.TextButton("Ok", on_click=close_banner),
         ],
@@ -314,6 +359,19 @@ def main(page: ft.Page):
                     [
                         principal_content,
                         create_group
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                )
+            )
+
+        if page.route == "/join":
+            page.clean()
+            page.add(
+                ft.Column(
+                    [
+                        principal_content,
+                        join_group
                     ],
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER
